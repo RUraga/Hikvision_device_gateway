@@ -1,8 +1,8 @@
 """Cuerpos que el bridge realmente construye para Rancherito.
 
-Los textos fixture-* y checkIn/Entrada de las muestras locales no son códigos
-confirmados del reloj. Sirven para que los dos repositorios comparen los
-mismos bytes.
+Los textos fixture-* no son códigos del reloj. checkIn, checkOut, breakIn y
+breakOut sí lo son en el dispositivo 9CE552AA-7ACD-7145-B340-A8618DA1B946;
+los traduce Rancherito. El label Entrada de estos fixtures puede faltar en vivo.
 """
 
 from __future__ import annotations

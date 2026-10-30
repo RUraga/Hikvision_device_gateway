@@ -28,7 +28,7 @@ Pendiente de contrastar con el hardware y con Laravel:
 - La guía de ejemplo envía `Content-Type: application/x-www-form-urlencoded` aunque el cuerpo es JSON. Este servicio envía `application/json`.
 - El catálogo numérico major/minor (apéndice C de la guía UD29329B) no venía en el texto recuperado. `result` queda en `unknown` hasta que se configuren códigos confirmados en el terminal. No se trata todo el major 5 como marcación válida.
 - `serialNo` puede no coincidir entre el vivo y el historial. La guía (A.33, `frontSerialNo`) lo menciona como problema de la suscripción. La identidad provisional incluye el serial; si las dos fuentes discrepan, no se deduplican. Rancherito todavía impone `UNIQUE(device_uid, serial_no)`, así que hace falta la misma marcación capturada en vivo y en `AcsEvent` antes de dar el serial por estable.
-- El mapa de acciones de Rancherito está vacío. Faltan cuatro pulsaciones reales: entrada laboral, salida laboral, salida a comida o descanso, y regreso. Hay que anotar `attendance_status`, `label`, `major_event_type` y `sub_event_type` tal como llegan. No se inventan esos códigos.
+- Rancherito traduce, solo en el reloj `9CE552AA-7ACD-7145-B340-A8618DA1B946`, `checkIn` a entrada, `checkOut` a salida, `breakIn` a inicio de descanso y `breakOut` a regreso. No exige `label`. Comida y descanso comparten esas opciones. El bridge reenvía `attendance_status` y `label` tal como llegan.
 - `searchResultPosition` se envía como desplazamiento inicial (0, luego la suma de `numOfMatches`). Hay que confirmarlo con una consulta real.
 - No se envía `picEnable`. La guía no aclara si filtra eventos o solo pide fotos.
 - La ruta `POST https://admin.rancherito.com.mx/api/integrations/hikvision/events` ya está implementada. El bridge la llama con el token de `settings.key = hikvision_integration_token`.
@@ -154,7 +154,7 @@ Si hace falta un `curl` manual, la contraseña queda en el entorno y el cuerpo e
 curl.exe --digest -u "admin:$env:HIKVISION_GATEWAY_PASSWORD" -X POST "http://127.0.0.1/ISAPI/AccessControl/AcsEvent?format=json&devIndex=9CE552AA-7ACD-7145-B340-A8618DA1B946" -H "Content-Type: application/json" --data-binary "@consulta.json"
 ```
 
-Siguen haciendo falta cuatro pulsaciones reales, en otro momento: entrada, salida, salida a comida o descanso, y regreso. Anota `attendance_status`, `label` y los tipos major/minor tal como llegan. El mapa de acciones de Rancherito está vacío.
+En ese reloj, `checkIn`, `checkOut`, `breakIn` y `breakOut` ya están traducidos. Comida y descanso no se separan. Anota igual `label` y los tipos major/minor cuando lleguen, porque el mapa no los usa para decidir la acción.
 
 ## Rechazados
 
@@ -277,7 +277,7 @@ Cuerpo, versión 1. `major_event_type` y `sub_event_type` son los del equipo; no
 
 Los números 5 y 75 de ese ejemplo no son un catálogo del terminal. En un evento real se reenvían los valores recibidos.
 
-`result` es `success`, `failure` o `unknown`. Con las listas de códigos vacías sale `unknown`. Rancherito lo guarda como `pending_classification` y no abre ni cierra intervalos. Solo `success` entra al cálculo. `failure` se guarda y no modifica sesiones. No se interpreta `unknown` como éxito aunque haya `employee_no` y una acción reconocida. `verify_mode` es `currentVerifyMode`. `attendance_status` y `label` se reenvían tal como llegaron, hasta 32 y 100 caracteres. `employee_no` y `card_no` hasta 64. `name` hasta 100. `serial_no` es un entero de 0 a 4294967295. No se traducen a entrada, salida, comida o descanso: el mapa de acciones de Rancherito está vacío.
+`result` es `success`, `failure` o `unknown`. Con las listas de códigos vacías sale `unknown`. Rancherito lo guarda como `pending_classification` y no abre ni cierra intervalos. Solo `success` entra al cálculo. `failure` se guarda y no modifica sesiones. No se interpreta `unknown` como éxito aunque haya `employee_no` y una acción reconocida. `verify_mode` es `currentVerifyMode`. `attendance_status` y `label` se reenvían tal como llegaron, hasta 32 y 100 caracteres. `employee_no` y `card_no` hasta 64. `name` hasta 100. `serial_no` es un entero de 0 a 4294967295. El bridge no traduce la acción: Rancherito lo hace con el `attendance_status` de ese reloj.
 
 `source` es `live` o `backfill`. No forma parte de la identidad.
 
