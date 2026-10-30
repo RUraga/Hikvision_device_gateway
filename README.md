@@ -102,7 +102,7 @@ No se guardan en TOML, SQLite ni en los logs habituales. `verify_tls` está acti
 .\.venv\Scripts\hikvision-event-bridge.exe diagnostics --config config.toml
 ```
 
-`status` abre la base en solo lectura. `run` impide una segunda instancia con un cerrojo y latido; si el proceso muere, el cerrojo se puede tomar cuando vence el TTL.
+`status` abre la base en solo lectura. `run` impide una segunda instancia con un cerrojo y latido. Cada hilo abre y cierra su propia conexión. Si el latido falla, el servicio se detiene y deja el error. Si el proceso muere, el cerrojo se puede tomar cuando vence el TTL.
 
 `--dry-run` no hace POST, no marca `delivered` y exige `--database` distinta de la de producción. Sí puede abrir la suscripción del gateway y escribir en esa otra base.
 

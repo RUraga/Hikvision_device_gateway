@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from hikvision_event_bridge.backfill import reconcile_device, recover_window
 from hikvision_event_bridge.config import AppConfig, ConfigError, DeviceConfig
-from hikvision_event_bridge.database import INSERT_CONFLICT, INSERT_DUPLICATE, INSERT_STORED, ClaimedDelivery, Database
+from hikvision_event_bridge.database import INSERT_CONFLICT, INSERT_DUPLICATE, INSERT_STORED, ClaimedDelivery, Database, LockLost
 from hikvision_event_bridge.delivery import AttemptResult, DestinationPoster, next_delay, schedule_after
 from hikvision_event_bridge.gateway import GatewayClient, GatewayError, subscription_id_from_payload
 from hikvision_event_bridge.logging_config import log
@@ -49,9 +49,11 @@ class BridgeService:
         self._stop = threading.Event()
         self._subscription_id: str | None = None
         self._subscription_lock = threading.Lock()
+        self._heartbeat_error: BaseException | None = None
 
     def run(self, stop: threading.Event) -> None:
         self._stop = stop
+        self._heartbeat_error = None
         self.database.migrate()
         self.resolve_routes()
         now = self.clock()
@@ -59,16 +61,10 @@ class BridgeService:
         if released:
             log(LOGGER, logging.INFO, "entregas_en_vuelo_recuperadas", total=released)
         owner = self.database.owner_name()
-        lock_connection = self.database.connect()
-        self.database.acquire_instance_lock(
-            lock_connection,
-            owner,
-            timedelta(seconds=self.config.storage.lock_ttl_seconds),
-            now,
-        )
+        self._acquire_instance_lock(owner, now)
         threads: list[threading.Thread] = []
         try:
-            threads.append(threading.Thread(target=self._lock_heartbeat, args=(lock_connection, owner), name="heb-lock", daemon=True))
+            threads.append(threading.Thread(target=self._lock_heartbeat, args=(owner,), name="heb-lock", daemon=True))
             threads.append(threading.Thread(target=self._subscribe_loop, name="heb-subscribe", daemon=True))
             threads.append(threading.Thread(target=self._backfill_loop, name="heb-backfill", daemon=True))
             threads.append(threading.Thread(target=self._retention_loop, name="heb-retention", daemon=True))
@@ -81,19 +77,22 @@ class BridgeService:
                 stop.wait(0.2)
         finally:
             stop.set()
-            if self.gateway is not None:
-                self.gateway.close_stream()
-            subscription_id = self._subscription_id
-            if subscription_id and self.gateway is not None:
-                self.gateway.unsubscribe(subscription_id)
-                log(LOGGER, logging.INFO, "suscripcion_cancelada", subscription_id=subscription_id)
-            for thread in threads:
-                thread.join(timeout=2)
-            self.database.release_instance_lock(lock_connection, owner)
-            lock_connection.close()
-            closer = getattr(self.gateway, "close", None)
-            if closer is not None:
-                closer()
+            try:
+                if self.gateway is not None:
+                    self.gateway.close_stream()
+                subscription_id = self._subscription_id
+                if subscription_id and self.gateway is not None:
+                    self.gateway.unsubscribe(subscription_id)
+                    log(LOGGER, logging.INFO, "suscripcion_cancelada", subscription_id=subscription_id)
+                for thread in threads:
+                    thread.join(timeout=2)
+            finally:
+                self._release_instance_lock(owner)
+                closer = getattr(self.gateway, "close", None)
+                if closer is not None:
+                    closer()
+        if self._heartbeat_error is not None:
+            raise self._heartbeat_error
 
     def resolve_routes(self) -> None:
         grouped: dict[str, set[str]] = {}
@@ -131,13 +130,52 @@ class BridgeService:
             else:
                 log(LOGGER, logging.WARNING, "se_conserva_la_url_original", destination=destination_id)
 
-    def _lock_heartbeat(self, connection, owner: str) -> None:
+    def _acquire_instance_lock(self, owner: str, now: datetime) -> None:
+        connection = self.database.connect()
+        try:
+            self.database.acquire_instance_lock(
+                connection,
+                owner,
+                timedelta(seconds=self.config.storage.lock_ttl_seconds),
+                now,
+            )
+        finally:
+            connection.close()
+
+    def _release_instance_lock(self, owner: str) -> None:
+        connection = self.database.connect()
+        try:
+            self.database.release_instance_lock(connection, owner)
+        finally:
+            connection.close()
+
+    def _lock_heartbeat(self, owner: str) -> None:
+        """Renueva el cerrojo con una conexión abierta en este hilo.
+
+        SQLite rechaza usar en otro hilo la conexión que creó el arranque.
+        check_same_thread sigue activo: cada hilo abre y cierra la suya.
+        Si el latido falla, el servicio se detiene y run() vuelve a lanzar el error.
+        """
         interval = max(1.0, self.config.storage.lock_ttl_seconds / 3)
-        while not self._stop.wait(interval):
-            if not self.database.heartbeat_lock(connection, owner, self.clock()):
-                log(LOGGER, logging.ERROR, "cerrojo_perdido")
-                self._stop.set()
-                return
+        connection = None
+        try:
+            connection = self.database.connect()
+            while not self._stop.wait(interval):
+                if not self.database.heartbeat_lock(connection, owner, self.clock()):
+                    raise LockLost("el cerrojo ya no pertenece a esta instancia")
+        except Exception as exc:
+            self._heartbeat_error = exc
+            log(
+                LOGGER,
+                logging.ERROR,
+                "cerrojo_no_renovado",
+                error=type(exc).__name__,
+                detail=str(exc),
+            )
+            self._stop.set()
+        finally:
+            if connection is not None:
+                connection.close()
 
     def _subscribe_loop(self) -> None:
         delay = self.config.delivery.initial_backoff_seconds

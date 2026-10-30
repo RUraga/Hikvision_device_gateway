@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from hikvision_event_bridge.config import ConfigError, load_config
-from hikvision_event_bridge.database import Database
+from hikvision_event_bridge.database import Database, LockBusy
 from hikvision_event_bridge.delivery import AttemptResult
 from hikvision_event_bridge.gateway import GatewayError
 from hikvision_event_bridge.multipart import Part
@@ -480,3 +480,75 @@ def test_un_fallo_detiene_el_servicio_y_el_gateway(tmp_path: Path, monkeypatch: 
     assert running is not None
     assert not running.thread.is_alive()
     assert gateway._thread is None
+
+
+def test_el_latido_renueva_el_cerrojo_y_el_apagado_lo_libera(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _service(tmp_path, monkeypatch, lock_ttl=3)
+    gateway = FakeGateway([])
+    service = BridgeService(config, gateway=gateway, dry_run=True)
+    database = Database(config.storage.sqlite_path)
+    renewals: list[str] = []
+    original = Database.heartbeat_lock
+
+    def spy(self, connection, owner, now):
+        assert threading.current_thread().name == "heb-lock"
+        renewed = original(self, connection, owner, now)
+        if renewed:
+            row = connection.execute("SELECT heartbeat_at FROM instance_lock WHERE id = 1").fetchone()
+            renewals.append(str(row["heartbeat_at"]))
+        return renewed
+
+    monkeypatch.setattr(Database, "heartbeat_lock", spy)
+
+    running = ServiceRun(service)
+    with running:
+        _wait_until(lambda: len(renewals) >= 3, timeout=8)
+        assert any(thread.name == "heb-lock" and thread.is_alive() for thread in threading.enumerate())
+        other = database.connect()
+        try:
+            with pytest.raises(LockBusy):
+                database.acquire_instance_lock(other, "otra-instancia", timedelta(seconds=30), utc_now())
+        finally:
+            other.close()
+
+    assert not running.thread.is_alive()
+    assert not any(thread.name.startswith("heb-") and thread.is_alive() for thread in threading.enumerate())
+    connection = database.connect()
+    try:
+        assert connection.execute("SELECT owner FROM instance_lock WHERE id = 1").fetchone() is None
+        database.acquire_instance_lock(connection, "despues-del-apagado", timedelta(seconds=30), utc_now())
+        database.release_instance_lock(connection, "despues-del-apagado")
+    finally:
+        connection.close()
+
+
+def test_un_fallo_del_latido_detiene_el_servicio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _service(tmp_path, monkeypatch, lock_ttl=3)
+    gateway = FakeGateway([])
+    service = BridgeService(config, gateway=gateway, dry_run=True)
+    database = Database(config.storage.sqlite_path)
+    captured: list[BaseException] = []
+
+    def broken(self, connection, owner, now):
+        raise sqlite3.ProgrammingError(
+            "SQLite objects created in a thread can only be used in that same thread."
+        )
+
+    def hook(args) -> None:
+        if args.exc_value is not None:
+            captured.append(args.exc_value)
+
+    monkeypatch.setattr(Database, "heartbeat_lock", broken)
+    monkeypatch.setattr(threading, "excepthook", hook)
+    with ServiceRun(service) as running:
+        _wait_until(lambda: service._heartbeat_error is not None, timeout=5)
+
+    assert not running.thread.is_alive()
+    assert not any(thread.name.startswith("heb-") and thread.is_alive() for thread in threading.enumerate())
+    assert isinstance(service._heartbeat_error, sqlite3.ProgrammingError)
+    assert captured and isinstance(captured[0], sqlite3.ProgrammingError)
+    connection = database.connect()
+    try:
+        assert connection.execute("SELECT id FROM instance_lock WHERE id = 1").fetchone() is None
+    finally:
+        connection.close()

@@ -231,6 +231,7 @@ def write_config(path: Path, gateway_url: str, destination_url: str, **overrides
     post_timeout = overrides.get("post_timeout", 2)
     stream_timeout = overrides.get("stream_timeout", 2)
     sqlite_name = overrides.get("sqlite_name", "events.sqlite")
+    lock_ttl = overrides.get("lock_ttl", 30)
     extra_destinations = overrides.get("extra_destinations", "")
     destination_names = overrides.get("destination_names", '["rancherito"]')
     pending_policy = overrides.get("pending_policy", "")
@@ -250,7 +251,7 @@ post_seconds = {post_timeout}
 [storage]
 sqlite_path = "{sqlite_name}"
 busy_timeout_ms = 2000
-lock_ttl_seconds = 30
+lock_ttl_seconds = {lock_ttl}
 
 [retention]
 delivered_days = 30

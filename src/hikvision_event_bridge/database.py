@@ -116,6 +116,10 @@ class LockBusy(Exception):
     pass
 
 
+class LockLost(Exception):
+    """El latido ya no pudo renovar el cerrojo de esta instancia."""
+
+
 @dataclass
 class StoredEvent:
     row_id: int

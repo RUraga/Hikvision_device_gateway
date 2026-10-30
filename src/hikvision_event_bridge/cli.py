@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from hikvision_event_bridge.config import ConfigError, load_config, load_dotenv
-from hikvision_event_bridge.database import Database, LockBusy
+from hikvision_event_bridge.database import Database, LockBusy, LockLost
 from hikvision_event_bridge.logging_config import configure_logging
 from hikvision_event_bridge.service import BridgeService
 from hikvision_event_bridge.timeutil import parse_configured_time, utc_now
@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"error de configuración: {exc}", file=sys.stderr)
         return 2
-    except LockBusy as exc:
+    except (LockBusy, LockLost) as exc:
         print(str(exc), file=sys.stderr)
         return 3
     except FileNotFoundError as exc:
