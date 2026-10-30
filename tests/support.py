@@ -82,12 +82,19 @@ class GatewayHarness:
                 harness.authorized.append((method, self.path))
                 return True
 
+            def handle_error(self, request, client_address) -> None:
+                return
+
             def _send(self, status: int, body: bytes, content_type: str) -> None:
-                self.send_response(status)
-                self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.send_response(status)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    if body:
+                        self.wfile.write(body)
+                except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, ValueError):
+                    return
 
             def do_GET(self) -> None:
                 if not self._authed("GET"):
@@ -121,14 +128,20 @@ class GatewayHarness:
 
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._httpd.daemon_threads = True
-        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True, name="gateway-harness")
         self._thread.start()
         return self.url
 
     def stop(self) -> None:
-        if self._httpd is not None:
-            self._httpd.shutdown()
-            self._httpd.server_close()
+        httpd = self._httpd
+        thread = self._thread
+        self._httpd = None
+        if httpd is not None:
+            httpd.shutdown()
+            httpd.server_close()
+        if thread is not None:
+            thread.join(3)
+        self._thread = None
 
 
 class DestinationHarness:
@@ -153,6 +166,9 @@ class DestinationHarness:
             def log_message(self, fmt: str, *args) -> None:
                 return
 
+            def handle_error(self, request, client_address) -> None:
+                return
+
             def do_POST(self) -> None:
                 length = int(self.headers.get("Content-Length", "0") or 0)
                 raw = self.rfile.read(length) if length else b""
@@ -171,27 +187,36 @@ class DestinationHarness:
                 body = step.get("body", b"")
                 if isinstance(body, dict):
                     body = json.dumps(body).encode()
-                self.send_response(step["status"])
-                for key, value in step.get("headers", {}).items():
-                    self.send_header(key, value)
-                if step["status"] in {301, 302, 303, 307, 308}:
-                    self.send_header("Location", step.get("location", "/otro-origen"))
-                self.send_header("Content-Type", step.get("content_type", "application/json"))
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                if body:
-                    self.wfile.write(body)
+                try:
+                    self.send_response(step["status"])
+                    for key, value in step.get("headers", {}).items():
+                        self.send_header(key, value)
+                    if step["status"] in {301, 302, 303, 307, 308}:
+                        self.send_header("Location", step.get("location", "/otro-origen"))
+                    self.send_header("Content-Type", step.get("content_type", "application/json"))
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    if body:
+                        self.wfile.write(body)
+                except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, ValueError):
+                    return
 
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._httpd.daemon_threads = True
-        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True, name="destination-harness")
         self._thread.start()
         return self.url
 
     def stop(self) -> None:
-        if self._httpd is not None:
-            self._httpd.shutdown()
-            self._httpd.server_close()
+        httpd = self._httpd
+        thread = self._thread
+        self._httpd = None
+        if httpd is not None:
+            httpd.shutdown()
+            httpd.server_close()
+        if thread is not None:
+            thread.join(3)
+        self._thread = None
 
 
 def write_config(path: Path, gateway_url: str, destination_url: str, **overrides: object) -> None:

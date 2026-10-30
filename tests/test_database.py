@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -52,6 +54,71 @@ def test_persistir_antes_de_enviar_y_duplicado(tmp_path: Path) -> None:
     assert _store(database, event) == INSERT_DUPLICATE
     status = database.status()
     assert status["deliveries"]["pending"] == 1
+
+
+def test_el_historial_completa_el_label_vacio_y_conserva_el_raw(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    live = _event()
+    live["label"] = None
+    live["raw"] = {"serialNo": live["serial_no"], "attendanceStatus": "checkIn"}
+    assert _store(database, live) == INSERT_STORED
+    connection = database.connect()
+    try:
+        connection.execute("UPDATE deliveries SET state = 'delivered'")
+        connection.commit()
+    finally:
+        connection.close()
+    history = dict(live)
+    history["label"] = "Entrada"
+    history["source"] = "backfill"
+    history["raw"] = {"label": "Entrada", "serialNo": live["serial_no"]}
+    assert _store(database, history) == INSERT_DUPLICATE
+    connection = database.connect()
+    try:
+        event = connection.execute("SELECT normalized_json, raw_json, source FROM events").fetchone()
+        normalized = json.loads(event["normalized_json"])
+        raw = json.loads(event["raw_json"])
+        assert normalized["label"] == "Entrada"
+        assert normalized["event_id"] == live["event_id"]
+        assert "label" not in raw
+        assert event["source"] == "live"
+        evidence = connection.execute("SELECT source, raw_json FROM event_evidence ORDER BY id").fetchall()
+        assert [row["source"] for row in evidence] == ["live", "backfill"]
+        assert json.loads(evidence[1]["raw_json"])["label"] == "Entrada"
+        assert connection.execute("SELECT state FROM deliveries").fetchone()["state"] == "pending"
+        assert connection.execute("SELECT COUNT(*) AS total FROM deliveries").fetchone()["total"] == 1
+    finally:
+        connection.close()
+    contradicted = dict(live)
+    contradicted["label"] = "Salida"
+    contradicted["source"] = "backfill"
+    assert _store(database, contradicted) == INSERT_CONFLICT
+    connection = database.connect()
+    try:
+        assert json.loads(connection.execute("SELECT normalized_json FROM events").fetchone()["normalized_json"])["label"] == "Entrada"
+    finally:
+        connection.close()
+
+
+def test_la_base_publica_no_aparece_sin_la_tabla_deliveries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    database = Database(tmp_path / "events.sqlite")
+    real_replace = os.replace
+    ready = {}
+
+    def spy(src: str, dst: str) -> None:
+        connection = sqlite3.connect(src)
+        try:
+            connection.execute("SELECT COUNT(*) FROM deliveries")
+            ready["schema"] = True
+        finally:
+            connection.close()
+        assert Path(dst).exists() is False
+        real_replace(src, dst)
+
+    monkeypatch.setattr("hikvision_event_bridge.database.os.replace", spy)
+    database.migrate()
+    assert ready["schema"] is True
+    assert database.status()["deliveries"] == {}
 
 
 def test_conflicto_no_sobrescribe(tmp_path: Path) -> None:

@@ -80,23 +80,22 @@ def compare_capture(
     pages = 0
     historical: list[dict[str, Any]] = []
     positions: list[int] = []
+    request_body: dict[str, Any] = {}
     while pages < MAX_HISTORY_PAGES:
         positions.append(position)
-        payload = source.search_acs_events(
-            device.device_uid,
-            condition_body(
-                search_id=f"compare-{pages + 1}",
-                position=position,
-                max_results=page_size,
-                start=moment - margin,
-                end=moment + margin,
-                timezone_name=device.timezone,
-            ),
+        request_body = condition_body(
+            search_id=f"compare-{pages + 1}",
+            position=position,
+            max_results=page_size,
+            start=moment - margin,
+            end=moment + margin,
+            timezone_name=device.timezone,
         )
+        payload = source.search_acs_events(device.device_uid, request_body)
         page = parse_acs_response(payload)
         pages += 1
-        if page.error:
-            raise GatewayError(page.error)
+        if page.error or page.status.casefold() not in {"ok", "more", "no match"}:
+            raise GatewayError(page.error or f"estado_desconocido:{page.status}")
         for record in page.records:
             parsed = parse_history_record(
                 record,
@@ -107,10 +106,10 @@ def compare_capture(
             )
             if parsed.event is not None:
                 historical.append(parsed.event)
-        if page.status != "MORE" or page.num_of_matches <= 0:
+        if page.status.casefold() != "more" or page.num_of_matches <= 0:
             break
         position += page.num_of_matches
-    return CompareReport(_render(live, historical, positions, page_size), True)
+    return CompareReport(_render(live, historical, positions, request_body), True)
 
 
 def _live_event(path: Path, config: AppConfig, device_name: str) -> tuple[dict[str, Any], DeviceConfig]:
@@ -161,10 +160,21 @@ def _device_for(config: AppConfig, device_uid: str, device_name: str) -> DeviceC
     return None
 
 
-def _render(live: dict[str, Any], historical: list[dict[str, Any]], positions: list[int], page_size: int) -> str:
+def _render(
+    live: dict[str, Any],
+    historical: list[dict[str, Any]],
+    positions: list[int],
+    request_body: dict[str, Any],
+) -> str:
+    cond = request_body.get("AcsEventCond", {})
     lines = [
         "Comparación de solo lectura. Una muestra no vuelve estable serial_no ni el índice UNIQUE.",
-        f"páginas consultadas: {len(positions)}; searchResultPosition={positions}; maxResults={page_size}",
+        (
+            "petición: "
+            f"searchResultPosition={positions}; maxResults={cond.get('maxResults')}; "
+            f"major={cond.get('major')}; minor={cond.get('minor')}; "
+            f"startTime={cond.get('startTime')}; endTime={cond.get('endTime')}"
+        ),
         "vivo:",
         _event_block(live),
     ]
@@ -172,7 +182,8 @@ def _render(live: dict[str, Any], historical: list[dict[str, Any]], positions: l
     if same:
         lines.append("historial con el mismo event_id:")
         lines.append(_event_block(same[0]))
-        lines.append("event_id igual. Revisa aun así los campos que solo trae una fuente.")
+        lines.extend(_field_diffs(live, same[0]))
+        lines.append("event_id igual. La clave y el índice UNIQUE no cambian con esta muestra.")
         lines.extend(_exclusive_fields(live, same[0]))
         return "\n".join(lines)
     if not historical:
@@ -183,14 +194,20 @@ def _render(live: dict[str, Any], historical: list[dict[str, Any]], positions: l
     lines.append("ningún historial produjo el mismo event_id. Candidato más cercano:")
     lines.append(_event_block(candidate))
     lines.append("diferencias de identidad o de texto:")
-    for field in COMPARE_FIELDS:
-        left = candidate.get(field)
-        right = live.get(field)
-        if left != right:
-            lines.append(f"- {field}: historial={left!r} vivo={right!r}")
+    lines.extend(_field_diffs(live, candidate))
     lines.extend(_exclusive_fields(live, candidate))
     lines.append("event_id distinto. No se cambia la clave ni el índice UNIQUE con esta muestra.")
     return "\n".join(lines)
+
+
+def _field_diffs(live: dict[str, Any], historical: dict[str, Any]) -> list[str]:
+    lines = []
+    for field in COMPARE_FIELDS:
+        left = historical.get(field)
+        right = live.get(field)
+        if left != right:
+            lines.append(f"- {field}: historial={left!r} vivo={right!r}")
+    return lines
 
 
 def _event_block(event: dict[str, Any]) -> str:

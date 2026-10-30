@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from hikvision_event_bridge.config import DestinationConfig
 from hikvision_event_bridge.delivery import DestinationPoster, rancherito_storage_key
 from hikvision_event_bridge.identity import canonical_document, event_id_for
@@ -13,12 +15,12 @@ from contract_payloads import (
     CONTRACT_FIXTURE,
     DEVICE,
     MEAL_FIXTURE,
-    RANCHERITO_CONTRACT,
-    RANCHERITO_MEAL,
     bridge_contract_event,
     history_event_id,
     meal_sequence,
     missing_punch_sequence,
+    rancherito_contract_path,
+    rancherito_meal_path,
 )
 from support import DestinationHarness
 
@@ -26,8 +28,7 @@ from support import DestinationHarness
 def test_el_fixture_compartido_no_diverge_del_normalizador() -> None:
     current = bridge_contract_event()
     stored = json.loads(CONTRACT_FIXTURE.read_text(encoding="utf-8"))
-    rancherito = json.loads(RANCHERITO_CONTRACT.read_text(encoding="utf-8"))
-    assert current == stored == rancherito
+    assert current == stored
     assert current["employee_no"] == "0002"
     assert current["card_no"] == "03322275427"
     assert current["occurred_at"].endswith("-06:00")
@@ -42,6 +43,15 @@ def test_el_fixture_compartido_no_diverge_del_normalizador() -> None:
     derived = hashlib.sha256(f"hikvision-event-v1|{current['event_id']}".encode()).hexdigest()
     assert derived == rancherito_storage_key(current["event_id"])
     assert hashlib.sha256(f"hikvision-event-v1|{derived}".encode()).hexdigest() != derived
+
+
+def test_el_fixture_de_rancherito_coincide_cuando_el_repositorio_esta_configurado() -> None:
+    path = rancherito_contract_path()
+    if path is None:
+        pytest.skip(
+            "Rancherito no está disponible. Exporta RANCHERITO_ROOT para comparar el fixture cruzado."
+        )
+    assert json.loads(path.read_text(encoding="utf-8")) == bridge_contract_event()
 
 
 def test_la_misma_hora_con_otro_offset_conserva_el_event_id() -> None:
@@ -77,7 +87,12 @@ def test_la_misma_hora_con_otro_offset_conserva_el_event_id() -> None:
 def test_la_secuencia_de_comida_es_identica_en_los_dos_repositorios() -> None:
     document = {"meal": meal_sequence(), "missing_punch": missing_punch_sequence()}
     assert json.loads(MEAL_FIXTURE.read_text(encoding="utf-8")) == document
-    assert json.loads(RANCHERITO_MEAL.read_text(encoding="utf-8")) == document
+    meal_path = rancherito_meal_path()
+    if meal_path is None:
+        pytest.skip(
+            "Rancherito no está disponible. Exporta RANCHERITO_ROOT para comparar el fixture cruzado."
+        )
+    assert json.loads(meal_path.read_text(encoding="utf-8")) == document
     identifiers = [item["event_id"] for item in document["meal"] + document["missing_punch"]]
     assert len(identifiers) == len(set(identifiers))
     assert {item["result"] for item in document["meal"]} == {"unknown", "failure", "success"}

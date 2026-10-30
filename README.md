@@ -143,13 +143,13 @@ Después, sin guardar la marcación en la base ni enviarla:
 .\.venv\Scripts\hikvision-event-bridge.exe compare-sample --config config.toml --capture captures\muestra.bin --window-seconds 180
 ```
 
-Esa consulta pagina la ventana corta. No usa `maxResults=1`. Compara dispositivo, serial, instante UTC, precisión de la fecha, `employee_no`, `card_no`, major/minor, `attendance_status`, `label` y el `event_id` de cada adaptador. Si un campo solo viene en una fuente, los identificadores pueden diferir. Una muestra no declara estable el serial ni cambia `UNIQUE(device_uid, serial_no)`.
+Esa consulta pagina la ventana corta. No usa `maxResults=1`. Pide `major` 5 y `minor` 0, que en el equipo devolvieron la marcación junto con eventos de puerta; `minor` 0 no clasifica el resultado. Lee `AcsEvent.InfoList` y también `MatchList` si es la única lista. Si `numOfMatches` es mayor que cero y no hay lista legible, lo informa como error y no avanza el checkpoint. Compara dispositivo, serial, instante UTC, precisión de la fecha, `employee_no`, `card_no`, major/minor, `attendance_status`, `label` y el `event_id` de cada adaptador. Si un campo solo viene en una fuente, los identificadores pueden diferir. Una muestra no declara estable el serial ni cambia `UNIQUE(device_uid, serial_no)`.
 
 Si hace falta un `curl` manual, la contraseña queda en el entorno y el cuerpo en un archivo:
 
 ```powershell
 @'
-{"AcsEventCond":{"searchID":"diag-1","searchResultPosition":0,"maxResults":30,"startTime":"2026-10-29T08:55:00-06:00","endTime":"2026-10-29T09:05:00-06:00"}}
+{"AcsEventCond":{"searchID":"diag-1","searchResultPosition":0,"maxResults":30,"major":5,"minor":0,"startTime":"2026-10-29T08:55:00-06:00","endTime":"2026-10-29T09:05:00-06:00"}}
 '@ | Set-Content -Encoding utf8 consulta.json
 curl.exe --digest -u "admin:$env:HIKVISION_GATEWAY_PASSWORD" -X POST "http://127.0.0.1/ISAPI/AccessControl/AcsEvent?format=json&devIndex=9CE552AA-7ACD-7145-B340-A8618DA1B946" -H "Content-Type: application/json" --data-binary "@consulta.json"
 ```

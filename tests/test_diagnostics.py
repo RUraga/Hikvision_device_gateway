@@ -144,3 +144,114 @@ def test_compare_pagina_y_separa_un_event_id_distinto(tmp_path: Path, monkeypatc
     assert "employee_no" in mismatch
     assert "card_no" in mismatch
     assert "UNIQUE" in mismatch
+
+
+def test_infolist_empareja_la_marcacion_aunque_el_label_solo_venga_en_historial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    live = {
+        "EventNotificationAlert": {
+            "dateTime": "2026-10-29T18:47:13-06:00",
+            "eventType": "AccessControllerEvent",
+            "devIndex": DEVICE,
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 1,
+                "serialNo": 173,
+                "employeeNoString": "1005",
+                "cardNo": "fixture-card",
+                "attendanceStatus": "checkIn",
+                "currentVerifyMode": "face",
+            },
+        }
+    }
+    punch = {
+        "major": 5,
+        "minor": 1,
+        "time": "2026-10-29T18:47:13-06:00",
+        "serialNo": 173,
+        "employeeNoString": "1005",
+        "cardNo": "fixture-card",
+        "attendanceStatus": "checkIn",
+        "label": "Entrada",
+    }
+    door = {
+        "major": 5,
+        "minor": 21,
+        "time": "2026-10-29T18:47:13-06:00",
+        "serialNo": 174,
+    }
+    other_door = {**door, "minor": 22, "serialNo": 175}
+    gateway = GatewayHarness()
+    gateway.history_pages = [
+        {
+            "AcsEvent": {
+                "responseStatusStrg": "OK",
+                "numOfMatches": 3,
+                "totalMatches": 3,
+                "InfoList": [door, punch, other_door],
+            }
+        }
+    ]
+    url = gateway.start()
+    capture = tmp_path / "muestra.bin"
+    capture.write_bytes(b"-- part\n" + json.dumps(live).encode() + b"\n")
+    try:
+        code = main([
+            "--config", str(_config(tmp_path, monkeypatch, url)),
+            "--env-file", str(tmp_path / "no.env"),
+            "compare-sample",
+            "--capture", str(capture),
+            "--window-seconds", "180",
+        ])
+    finally:
+        gateway.stop()
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "event_id igual" in output
+    assert "major=5" in output
+    assert "minor=0" in output
+    assert "startTime=2026-10-29T18:44:13-06:00" in output
+    assert "endTime=2026-10-29T18:50:13-06:00" in output
+    assert "label: historial='Entrada' vivo=None" in output
+
+
+def test_una_respuesta_sin_lista_no_se_informa_como_historial_vacio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    live = {
+        "EventNotificationAlert": {
+            "dateTime": "2026-10-29T18:47:13-06:00",
+            "eventType": "AccessControllerEvent",
+            "devIndex": DEVICE,
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 1,
+                "serialNo": 173,
+                "employeeNoString": "1005",
+                "cardNo": "fixture-card",
+            },
+        }
+    }
+    gateway = GatewayHarness()
+    gateway.history_pages = [
+        {"AcsEvent": {"responseStatusStrg": "OK", "numOfMatches": 3, "totalMatches": 3}}
+    ]
+    url = gateway.start()
+    capture = tmp_path / "muestra.bin"
+    capture.write_bytes(b"-- part\n" + json.dumps(live).encode() + b"\n")
+    try:
+        code = main([
+            "--config", str(_config(tmp_path, monkeypatch, url)),
+            "--env-file", str(tmp_path / "no.env"),
+            "compare-sample",
+            "--capture", str(capture),
+            "--window-seconds", "180",
+        ])
+    finally:
+        gateway.stop()
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert code == 1
+    assert "lista_de_eventos_ausente" in output
+    assert "no devolvió marcaciones" not in output

@@ -8,6 +8,13 @@ de numOfMatches. La guía lo llama posición final y dice que la siguiente
 búsqueda continúa después de esa marca. Esa lectura no está verificada en el
 terminal de Rancherito.
 
+La búsqueda que devolvió la marcación del 2026-10-29 incluye major 5 y minor 0.
+minor 0 pide todos los subtipos de ese major, incluidas puertas. No clasifica
+el resultado ni declara válida toda marcación de major 5. La respuesta de ese
+equipo trae los registros en AcsEvent.InfoList. La guía también menciona
+MatchList. Si numOfMatches es mayor que cero y no hay una lista legible, la
+página es un error: no se trata como historial vacío y el checkpoint no avanza.
+
 No se envía picEnable. La guía no dice si filtra eventos o solo pide fotos.
 No se descargan imágenes.
 
@@ -53,6 +60,10 @@ class RecoverResult:
     message: str | None = None
 
 
+_KNOWN_STATUS = {"ok", "more", "no match"}
+_ABSENT = object()
+
+
 def parse_acs_response(payload: dict[str, Any]) -> HistoryPage:
     if "AcsEvent" not in payload:
         code = payload.get("statusCode")
@@ -62,17 +73,44 @@ def parse_acs_response(payload: dict[str, Any]) -> HistoryPage:
     if not isinstance(acs, dict):
         return HistoryPage("ERROR", [], 0, error="AcsEvent_no_objeto")
     status = str(acs.get("responseStatusStrg") or "").strip()
-    raw_records = acs.get("MatchList") or []
-    if not isinstance(raw_records, list):
-        return HistoryPage("ERROR", [], 0, error="MatchList_invalida")
-    records = [item for item in raw_records if isinstance(item, dict)]
+    records, list_error = _event_records(acs)
     number = acs.get("numOfMatches")
     if isinstance(number, bool) or not isinstance(number, int):
         number = len(records)
     total = acs.get("totalMatches")
     if isinstance(total, bool) or not isinstance(total, int):
         total = None
+    if list_error:
+        return HistoryPage("ERROR", [], number, total, error=list_error)
+    if status.casefold() not in _KNOWN_STATUS:
+        return HistoryPage("ERROR", [], number, total, error=f"estado_desconocido:{status}")
+    if number > 0 and not records:
+        return HistoryPage("ERROR", [], number, total, error="lista_de_eventos_ausente")
     return HistoryPage(status, records, number, total)
+
+
+def _event_records(acs: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
+    """InfoList es la lista que devolvió el equipo. MatchList se acepta si es la única."""
+    info = acs.get("InfoList", _ABSENT)
+    match = acs.get("MatchList", _ABSENT)
+    chosen: list[Any] | None = None
+    if info is not _ABSENT:
+        if not isinstance(info, list):
+            return [], "InfoList_invalida"
+        chosen = info
+    if match is not _ABSENT:
+        if not isinstance(match, list):
+            if chosen is None:
+                return [], "MatchList_invalida"
+        elif chosen is None or not chosen:
+            chosen = match
+        elif match and match != chosen:
+            return [], "listas_historicas_distintas"
+    if chosen is None:
+        return [], None
+    if any(not isinstance(item, dict) for item in chosen):
+        return [], "registro_historico_invalido"
+    return chosen, None
 
 
 def condition_body(
@@ -89,6 +127,8 @@ def condition_body(
             "searchID": search_id,
             "searchResultPosition": position,
             "maxResults": max_results,
+            "major": 5,
+            "minor": 0,
             "startTime": format_gateway_time(start, timezone_name),
             "endTime": format_gateway_time(end, timezone_name),
         }

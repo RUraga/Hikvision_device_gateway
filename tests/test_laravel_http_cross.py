@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import time
@@ -17,11 +18,61 @@ import requests
 
 from hikvision_event_bridge.config import DestinationConfig
 from hikvision_event_bridge.delivery import DestinationPoster, rancherito_storage_key
-from contract_payloads import meal_sequence, missing_punch_sequence, synthetic_event
+from contract_payloads import meal_sequence, missing_punch_sequence, rancherito_root, synthetic_event
 
-RANCHERITO = Path(r"C:\laragon\www\rancherito")
-PHP_BIN = r"C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64\php.exe"
-PHP = RANCHERITO / "tests" / "HikvisionCrossDb.php"
+
+def _php_binary() -> str | None:
+    candidates: list[str] = []
+    configured = os.environ.get("PHP_BIN", "").strip()
+    if configured:
+        candidates.append(configured)
+    found = shutil.which("php")
+    if found:
+        candidates.append(found)
+    fallback = Path(r"C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64\php.exe")
+    if fallback.is_file():
+        candidates.append(str(fallback))
+    for candidate in candidates:
+        if _php_supports(candidate):
+            return candidate
+    return None
+
+
+def _php_supports(binary: str) -> bool:
+    try:
+        completed = subprocess.run(
+            [binary, "-r", "echo PHP_MAJOR_VERSION, '.', PHP_MINOR_VERSION;"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    parts = completed.stdout.strip().split(".")
+    if completed.returncode != 0 or len(parts) < 2:
+        return False
+    try:
+        major = int(parts[0])
+        minor = int(parts[1])
+    except ValueError:
+        return False
+    return major > 8 or (major == 8 and minor >= 1)
+
+
+def _require_cross() -> tuple[Path, str]:
+    root = rancherito_root()
+    script = None if root is None else root / "tests" / "HikvisionCrossDb.php"
+    if root is None or script is None or not script.is_file():
+        pytest.skip(
+            "Rancherito no está disponible. Exporta RANCHERITO_ROOT para ejecutar la prueba cruzada."
+        )
+    binary = _php_binary()
+    if binary is None:
+        pytest.skip(
+            "Hace falta PHP 8.1 o posterior. Exporta PHP_BIN para ejecutar la prueba cruzada."
+        )
+    return root, binary
 
 
 def _free_port() -> int:
@@ -43,9 +94,10 @@ def _env(action_map: dict | None = None) -> dict[str, str]:
 
 
 def _php(action: str, suffix: str, action_map: dict | None = None) -> dict:
+    root, binary = _require_cross()
     completed = subprocess.run(
-        [PHP_BIN, str(PHP), action, suffix],
-        cwd=RANCHERITO,
+        [binary, str(root / "tests" / "HikvisionCrossDb.php"), action, suffix],
+        cwd=root,
         env=_env(action_map),
         capture_output=True,
         text=True,
@@ -74,8 +126,7 @@ def _wait_port(port: int, server: subprocess.Popen) -> None:
 
 
 def test_el_cliente_del_bridge_entra_en_laravel_y_calcula_sesiones() -> None:
-    if not PHP.is_file():
-        pytest.skip("no está el auxiliar de la base de pruebas")
+    root, binary = _require_cross()
     suffix = "c" + format(time.time_ns() % 0xFFFFFFF, "07x")
     rules = {
         "attendance": [
@@ -102,8 +153,8 @@ def test_el_cliente_del_bridge_entra_en_laravel_y_calcula_sesiones() -> None:
         action_map = {seeded["device_uid"]: rules["attendance"]}
         port = _free_port()
         server = subprocess.Popen(
-            [PHP_BIN, "artisan", "serve", "--host=127.0.0.1", f"--port={port}"],
-            cwd=RANCHERITO,
+            [binary, "artisan", "serve", "--host=127.0.0.1", f"--port={port}"],
+            cwd=root,
             env=_env(action_map),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

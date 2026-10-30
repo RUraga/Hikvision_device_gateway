@@ -21,7 +21,8 @@ No entran: UUID de recepción, received_at, source, intentos, JSON raw,
 nombre, label, attendance_status, verify_mode ni result. Esos últimos pueden
 omitirse en una de las dos fuentes. Si ambos traen un valor distinto en
 nombre, label, attendance_status o verify_mode, se registra una incidencia y
-no se sobrescribe el evento ya guardado.
+no se sobrescribe el valor existente. Un lado vacío sí puede completarse
+con el valor de la otra fuente; el raw de cada fuente se conserva.
 
 Limitación: si el vivo y el historial traen distinto ``serialNo`` para la
 misma marcación, no se deduplican. Si el dispositivo reutiliza un serial con
@@ -81,8 +82,8 @@ def event_id_for(document: dict[str, object]) -> str:
 def soft_conflict(stored: dict[str, object], incoming: dict[str, object]) -> str | None:
     """Conflicto solo si ambos lados traen un valor no vacío y distinto.
 
-    Un lado vacío no contradice al otro: el historial documentado puede omitir
-    el nombre. No se actualiza el registro existente.
+    Un lado vacío no contradice al otro. Ese vacío puede completarse después
+    sin sustituir un valor que ya existía.
     """
     for field in SOFT_FIELDS:
         old = _text(stored.get(field))

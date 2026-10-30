@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from datetime import timedelta
 from pathlib import Path
@@ -93,10 +94,36 @@ def _wait_until(predicate, timeout: float = 3) -> None:
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if predicate():
-            return
+        try:
+            if predicate():
+                return
+        except (FileNotFoundError, sqlite3.OperationalError):
+            pass
         time.sleep(0.02)
     raise AssertionError("la condición no se cumplió a tiempo")
+
+
+class ServiceRun:
+    """Arranca el servicio y lo detiene aunque la prueba falle."""
+
+    def __init__(self, service: BridgeService) -> None:
+        self.service = service
+        self.stop = threading.Event()
+        self.thread = threading.Thread(target=service.run, args=(self.stop,), name="heb-test-service")
+
+    def __enter__(self) -> "ServiceRun":
+        self.thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.stop.set()
+        close_stream = getattr(self.service.gateway, "close_stream", None)
+        if close_stream is not None:
+            try:
+                close_stream()
+            except Exception:
+                pass
+        self.thread.join(5)
 
 
 def test_evento_persistido_antes_del_envio_y_apagado(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,13 +142,9 @@ def test_evento_persistido_antes_del_envio_y_apagado(tmp_path: Path, monkeypatch
 
     poster.post = post
     service = BridgeService(config, gateway=gateway, poster=poster)
-    stop = threading.Event()
-    thread = threading.Thread(target=service.run, args=(stop,))
-    thread.start()
-    assert seen.wait(3)
-    stop.set()
-    thread.join(3)
-    assert not thread.is_alive()
+    with ServiceRun(service) as running:
+        assert seen.wait(3)
+    assert not running.thread.is_alive()
     assert gateway.unsubscribed == ["41"]
     assert poster.calls
     assert poster.payloads[0]["employee_no"] == "0002"
@@ -139,9 +162,6 @@ def test_dry_run_no_envia_ni_marca_delivered(tmp_path: Path, monkeypatch: pytest
     gateway = FakeGateway(_parts())
     poster = RecordingPoster()
     service = BridgeService(config, gateway=gateway, poster=poster, dry_run=True)
-    stop = threading.Event()
-    thread = threading.Thread(target=service.run, args=(stop,))
-    thread.start()
     database = Database(config.storage.sqlite_path)
 
     def stored() -> bool:
@@ -149,9 +169,8 @@ def test_dry_run_no_envia_ni_marca_delivered(tmp_path: Path, monkeypatch: pytest
             return False
         return database.status()["counters"].get("events_stored", 0) >= 1
 
-    _wait_until(stored)
-    stop.set()
-    thread.join(3)
+    with ServiceRun(service):
+        _wait_until(stored)
     assert poster.calls == []
     assert database.status()["deliveries"].get("pending") == 1
     assert database.status()["deliveries"].get("delivered") is None
@@ -171,17 +190,13 @@ def test_destino_lento_no_bloquea_al_otro(tmp_path: Path, monkeypatch: pytest.Mo
     gateway = FakeGateway(_parts())
     poster = RecordingPoster()
     service = BridgeService(config, gateway=gateway, poster=poster)
-    stop = threading.Event()
-    thread = threading.Thread(target=service.run, args=(stop,))
-    thread.start()
 
     def both() -> bool:
         names = {name for name, _event in poster.calls}
         return names == {"rancherito", "broken"}
 
-    _wait_until(both)
-    stop.set()
-    thread.join(3)
+    with ServiceRun(service):
+        _wait_until(both)
     status = Database(config.storage.sqlite_path).status()
     assert status["deliveries"].get("delivered") == 1
     assert status["deliveries"].get("pending") == 1
@@ -231,9 +246,6 @@ def test_timeout_despues_de_aceptar_reintenta_la_misma_clave(tmp_path: Path, mon
         config = _service(tmp_path, monkeypatch, destination_url=destination.url, post_timeout=0.3, initial_backoff=0.01, max_backoff=0.05, jitter=0)
         gateway = FakeGateway(_parts())
         service = BridgeService(config, gateway=gateway)
-        stop = threading.Event()
-        thread = threading.Thread(target=service.run, args=(stop,))
-        thread.start()
         database = Database(config.storage.sqlite_path)
 
         def delivered() -> bool:
@@ -241,9 +253,8 @@ def test_timeout_despues_de_aceptar_reintenta_la_misma_clave(tmp_path: Path, mon
                 return False
             return database.status()["deliveries"].get("delivered") == 1
 
-        _wait_until(delivered, timeout=4)
-        stop.set()
-        thread.join(3)
+        with ServiceRun(service):
+            _wait_until(delivered, timeout=4)
     finally:
         destination.stop()
     assert len(destination.seen) >= 2
@@ -277,9 +288,6 @@ def test_respuestas_http_del_destino(tmp_path: Path, monkeypatch: pytest.MonkeyP
                 jitter=0,
             )
             service = BridgeService(config, gateway=FakeGateway(_parts()))
-            stop = threading.Event()
-            thread = threading.Thread(target=service.run, args=(stop,))
-            thread.start()
             database = Database(config.storage.sqlite_path)
 
             def seen() -> bool:
@@ -288,9 +296,8 @@ def test_respuestas_http_del_destino(tmp_path: Path, monkeypatch: pytest.MonkeyP
                 counts = database.status()["deliveries"]
                 return expected in counts
 
-            _wait_until(seen)
-            stop.set()
-            thread.join(3)
+            with ServiceRun(service):
+                _wait_until(seen)
             assert database.status()["deliveries"].get(expected) == 1
         finally:
             destination.stop()
@@ -302,13 +309,9 @@ def test_confirmacion_invalida_queda_pendiente(tmp_path: Path, monkeypatch: pyte
     try:
         config = _service(tmp_path, monkeypatch, destination_url=destination.url, initial_backoff=30, max_backoff=30, jitter=0)
         service = BridgeService(config, gateway=FakeGateway(_parts()))
-        stop = threading.Event()
-        thread = threading.Thread(target=service.run, args=(stop,))
-        thread.start()
         database = Database(config.storage.sqlite_path)
-        _wait_until(lambda: bool(destination.seen) and config.storage.sqlite_path.exists() and database.status()["deliveries"].get("pending") == 1)
-        stop.set()
-        thread.join(3)
+        with ServiceRun(service):
+            _wait_until(lambda: bool(destination.seen) and config.storage.sqlite_path.exists() and database.status()["deliveries"].get("pending") == 1)
     finally:
         destination.stop()
     assert Database(config.storage.sqlite_path).status()["deliveries"].get("delivered") is None
@@ -442,9 +445,6 @@ def test_digest_reconexion_y_dispositivo_no_configurado(tmp_path: Path, monkeypa
             jitter=0,
         )
         service = BridgeService(config)
-        stop = threading.Event()
-        thread = threading.Thread(target=service.run, args=(stop,))
-        thread.start()
         database = Database(config.storage.sqlite_path)
 
         def ready() -> bool:
@@ -452,12 +452,31 @@ def test_digest_reconexion_y_dispositivo_no_configurado(tmp_path: Path, monkeypa
             stored = config.storage.sqlite_path.exists() and database.status()["counters"].get("events_stored", 0) >= 1
             return len(posts) >= 2 and stored
 
-        _wait_until(ready, timeout=4)
-        stop.set()
-        thread.join(3)
+        with ServiceRun(service):
+            _wait_until(ready, timeout=4)
     finally:
         gateway.stop()
         destination.stop()
     status = database.status()
     assert status["counters"].get("ignored_unconfigured", 0) >= 1
     assert any(path.startswith("/ISAPI/Event/notification/unSubscribeDeviceMgmt/77") for _method, path in gateway.authorized) or gateway.unsubscribed
+
+
+def test_un_fallo_detiene_el_servicio_y_el_gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    gateway = GatewayHarness()
+    gateway.subscribe_body = multipart_message(
+        [({"Content-Type": "application/json"}, b'{"SubscribeDeviceMgmtRsp":{"id":9}}')]
+    )
+    gateway.start()
+    running = None
+    try:
+        config = _service(tmp_path, monkeypatch, gateway_url=gateway.url)
+        running = ServiceRun(BridgeService(config))
+        with pytest.raises(AssertionError):
+            with running:
+                assert False
+    finally:
+        gateway.stop()
+    assert running is not None
+    assert not running.thread.is_alive()
+    assert gateway._thread is None

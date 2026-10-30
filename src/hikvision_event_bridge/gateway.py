@@ -53,6 +53,10 @@ class GatewayClient:
         if response is not None:
             response.close()
 
+    def close(self) -> None:
+        self.close_stream()
+        self.session.close()
+
     def subscribe(self) -> tuple[str, Iterator[Part]]:
         """Abre el stream. El primer valor útil puede ser el id de suscripción.
 

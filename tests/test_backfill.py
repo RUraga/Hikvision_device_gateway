@@ -144,3 +144,49 @@ def test_respuesta_vacia_y_error_de_autenticacion(tmp_path: Path, monkeypatch) -
     )
     assert later.auth_failed is True
     assert parse_acs_response({"statusCode": 4, "subStatusCode": "badParameters"}).status == "ERROR"
+
+
+def test_infolist_se_lee_y_una_lista_ausente_no_avanza_el_checkpoint(tmp_path: Path, monkeypatch) -> None:
+    config, database = _setup(tmp_path, monkeypatch)
+    record = {
+        "major": 5,
+        "minor": 1,
+        "time": "2026-10-29T18:47:13-06:00",
+        "serialNo": 173,
+        "employeeNoString": "1005",
+        "attendanceStatus": "checkIn",
+        "label": "Entrada",
+        "cardNo": "fixture-card",
+    }
+    page = parse_acs_response(
+        {
+            "AcsEvent": {
+                "responseStatusStrg": "OK",
+                "numOfMatches": 1,
+                "totalMatches": 1,
+                "InfoList": [record],
+            }
+        }
+    )
+    assert page.error is None
+    assert page.records == [record]
+    assert page.status == "OK"
+    missing = {
+        "AcsEvent": {
+            "responseStatusStrg": "OK",
+            "numOfMatches": 3,
+            "totalMatches": 3,
+        }
+    }
+    assert parse_acs_response(missing).error == "lista_de_eventos_ausente"
+    source = ScriptedHistory([missing])
+    now = datetime(2026, 10, 30, 1, 0, tzinfo=timezone.utc)
+    result = reconcile_device(config.devices["rancherito"], database, source, config, now, lambda _record: None, "test")
+    assert result.completed is False
+    sync = database.get_sync(UID)
+    assert sync is None or sync.checkpoint_until is None
+    sent = source.calls[0]["body"]["AcsEventCond"]
+    assert sent["major"] == 5
+    assert sent["minor"] == 0
+    assert sent["startTime"].endswith("-06:00")
+    assert sent["endTime"].endswith("-06:00")

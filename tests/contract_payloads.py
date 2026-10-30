@@ -8,6 +8,7 @@ mismos bytes.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from hikvision_event_bridge.config import FilterConfig
@@ -21,8 +22,38 @@ LIVE_FIXTURE = ROOT / "tests" / "fixtures" / "live_face.json"
 HISTORY_FIXTURE = ROOT / "tests" / "fixtures" / "historical_face.json"
 CONTRACT_FIXTURE = ROOT / "tests" / "fixtures" / "rancherito_contract_event.json"
 MEAL_FIXTURE = ROOT / "tests" / "fixtures" / "rancherito_meal_sequence.json"
-RANCHERITO_CONTRACT = Path(r"C:\laragon\www\rancherito\tests\fixtures\hikvision\rancherito_contract_event.json")
-RANCHERITO_MEAL = Path(r"C:\laragon\www\rancherito\tests\fixtures\hikvision\rancherito_meal_sequence.json")
+
+
+def rancherito_root() -> Path | None:
+    """Checkout de Rancherito, si está disponible.
+
+    RANCHERITO_ROOT tiene prioridad. Si no, se usa un directorio hermano que
+    contenga artisan. Sin eso, la suite del bridge sigue y las pruebas
+    cruzadas se omiten.
+    """
+    configured = os.environ.get("RANCHERITO_ROOT", "").strip()
+    candidates = []
+    if configured:
+        candidates.append(Path(configured))
+    candidates.append(ROOT.parent / "rancherito")
+    for candidate in candidates:
+        if (candidate / "artisan").is_file():
+            return candidate
+    return None
+
+
+def rancherito_contract_path() -> Path | None:
+    root = rancherito_root()
+    if root is None:
+        return None
+    return root / "tests" / "fixtures" / "hikvision" / "rancherito_contract_event.json"
+
+
+def rancherito_meal_path() -> Path | None:
+    root = rancherito_root()
+    if root is None:
+        return None
+    return root / "tests" / "fixtures" / "hikvision" / "rancherito_meal_sequence.json"
 
 EMPTY_FILTER = FilterConfig(
     major_event_types=(),

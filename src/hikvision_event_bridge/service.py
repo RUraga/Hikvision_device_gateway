@@ -91,6 +91,9 @@ class BridgeService:
                 thread.join(timeout=2)
             self.database.release_instance_lock(lock_connection, owner)
             lock_connection.close()
+            closer = getattr(self.gateway, "close", None)
+            if closer is not None:
+                closer()
 
     def resolve_routes(self) -> None:
         grouped: dict[str, set[str]] = {}

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from hikvision_event_bridge.identity import soft_conflict
+from hikvision_event_bridge.identity import SOFT_FIELDS, soft_conflict
 from hikvision_event_bridge.timeutil import format_utc, parse_utc, utc_now
 
 SCHEMA = """
@@ -69,6 +69,15 @@ CREATE TABLE IF NOT EXISTS incidents (
     device_uid TEXT,
     event_id TEXT,
     details_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_evidence (
+    id INTEGER PRIMARY KEY,
+    event_row_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(event_row_id, source)
 );
 
 CREATE TABLE IF NOT EXISTS counters (
@@ -140,7 +149,8 @@ class Database:
         self.busy_timeout_ms = busy_timeout_ms
 
     def connect(self) -> sqlite3.Connection:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.path.exists():
+            raise FileNotFoundError(self.path)
         connection = sqlite3.connect(self.path, timeout=self.busy_timeout_ms / 1000, isolation_level=None)
         connection.row_factory = sqlite3.Row
         self._prepare(connection)
@@ -164,6 +174,9 @@ class Database:
             connection.close()
 
     def migrate(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.path.exists():
+            self._publish_new_database()
         with self.session() as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.executescript(SCHEMA)
@@ -174,6 +187,33 @@ class Database:
                 connection.rollback()
                 raise RuntimeError(f"versión de esquema no soportada: {row['value']}")
             connection.commit()
+
+    def _publish_new_database(self) -> None:
+        """El archivo público aparece solo cuando deliveries ya existe.
+
+        sqlite3.connect crea el archivo antes del esquema. Una consulta de
+        estado que vea ese archivo a medias recibe 'no such table'.
+        """
+        partial = self.path.with_name(f".{self.path.name}.{os.getpid()}.partial")
+        published = False
+        try:
+            connection = sqlite3.connect(partial, timeout=self.busy_timeout_ms / 1000, isolation_level=None)
+            try:
+                connection.executescript(SCHEMA)
+                connection.execute("INSERT INTO schema_meta(key, value) VALUES ('version', '1')")
+                connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                connection.close()
+            for extra in (Path(str(partial) + "-wal"), Path(str(partial) + "-shm")):
+                if extra.exists():
+                    extra.unlink()
+            os.replace(partial, self.path)
+            published = True
+        finally:
+            if not published:
+                for candidate in (partial, Path(str(partial) + "-wal"), Path(str(partial) + "-shm")):
+                    if candidate.exists():
+                        candidate.unlink()
 
     def owner_name(self) -> str:
         return f"{socket.gethostname()}:{os.getpid()}"
@@ -244,6 +284,25 @@ class Database:
                     )
                     connection.commit()
                     return INSERT_CONFLICT
+                self._keep_evidence(connection, int(existing["id"]), source, raw, received_at)
+                completed = _blank_completions(stored, normalized)
+                if completed:
+                    stored.update(completed)
+                    connection.execute(
+                        "UPDATE events SET normalized_json = ? WHERE id = ?",
+                        (json.dumps(stored, ensure_ascii=False, sort_keys=True), existing["id"]),
+                    )
+                    connection.execute(
+                        """
+                        UPDATE deliveries
+                        SET state = 'pending',
+                            next_attempt_at = ?,
+                            lease_owner = NULL,
+                            lease_until = NULL
+                        WHERE event_row_id = ? AND state IN ('pending', 'in_flight', 'delivered')
+                        """,
+                        (format_utc(received_at), existing["id"]),
+                    )
                 connection.commit()
                 return INSERT_DUPLICATE
             cursor = connection.execute(
@@ -266,6 +325,7 @@ class Database:
                 ),
             )
             event_row_id = int(cursor.lastrowid)
+            self._keep_evidence(connection, event_row_id, source, raw, received_at)
             created = format_utc(received_at)
             for destination_id, url in destinations:
                 connection.execute(
@@ -686,6 +746,28 @@ class Database:
             attempts=row["attempts"],
         )
 
+    def _keep_evidence(
+        self,
+        connection: sqlite3.Connection,
+        event_row_id: int,
+        source: str,
+        raw: dict[str, object],
+        now: datetime,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO event_evidence(event_row_id, source, raw_json, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(event_row_id, source) DO NOTHING
+            """,
+            (
+                event_row_id,
+                source,
+                json.dumps(raw, ensure_ascii=False, sort_keys=True),
+                format_utc(now),
+            ),
+        )
+
     def _incident(
         self,
         connection: sqlite3.Connection,
@@ -709,6 +791,20 @@ class Database:
                 json.dumps(_sanitize(details), ensure_ascii=False, sort_keys=True),
             ),
         )
+
+
+def _blank_completions(stored: dict[str, object], incoming: dict[str, object]) -> dict[str, object]:
+    """Completa solo campos vacíos. Un valor ya guardado no se sustituye."""
+    completed: dict[str, object] = {}
+    for field in SOFT_FIELDS:
+        if _present(stored.get(field)) or not _present(incoming.get(field)):
+            continue
+        completed[field] = incoming.get(field)
+    return completed
+
+
+def _present(value: object) -> bool:
+    return value is not None and value != ""
 
 
 def _clip(value: str | None, limit: int = 300) -> str | None:
