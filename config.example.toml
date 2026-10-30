@@ -1,0 +1,84 @@
+# Ejemplo para Rancherito. Copie este archivo a config.toml.
+# Las contraseñas y tokens van en el entorno, nunca aquí.
+# backfill.initial_start es obligatorio y explícito: el servicio no
+# empieza en "ahora" ni importa todo el historial por su cuenta.
+
+[gateway]
+# En el servidor del Device Gateway: http://127.0.0.1
+# Desde otro equipo solo con un túnel explícito, o con la URL remota
+# después de comprobar Digest y el stream multipart. No desactives verify_tls.
+# url = "https://hikvision.toucheim.com"
+url = "http://127.0.0.1"
+username = "admin"
+password_env = "HIKVISION_GATEWAY_PASSWORD"
+verify_tls = true
+
+[timeouts]
+connect_seconds = 5
+stream_seconds = 30
+post_seconds = 10
+
+[storage]
+sqlite_path = "data/events.sqlite"
+busy_timeout_ms = 5000
+lock_ttl_seconds = 30
+
+[retention]
+delivered_days = 30
+
+[delivery]
+concurrency = 4
+initial_backoff_seconds = 2
+max_backoff_seconds = 300
+auth_hold_seconds = 900
+retry_after_cap_seconds = 300
+jitter_ratio = 0.2
+
+[backfill]
+enabled = true
+interval_seconds = 300
+overlap_seconds = 120
+window_seconds = 3600
+page_size = 30
+min_window_seconds = 60
+initial_start = "2026-10-01T00:00:00-06:00"
+
+[limits]
+max_header_bytes = 16384
+max_json_part_bytes = 1048576
+max_binary_part_bytes = 8388608
+
+[privacy]
+strip_biometric_fields = true
+
+[logging]
+level = "INFO"
+
+[devices.rancherito]
+device_uid = "9CE552AA-7ACD-7145-B340-A8618DA1B946"
+enabled = true
+timezone = "America/Mexico_City"
+destinations = ["rancherito"]
+
+[devices.rancherito.filter]
+# Vacío a propósito: el catálogo numérico major/minor no quedó disponible
+# en el texto recuperado de la guía y no se activa como definitivo.
+major_event_types = []
+sub_event_types = []
+# currentVerifyMode documentado. "cardOrFace" entra porque contiene ambos.
+include_authentication = ["card", "face"]
+# Códigos minor que también deben entrar aunque el equipo deje currentVerifyMode vacío.
+# No hay lista predeterminada: complétela después de ver muestras reales.
+authentication_sub_event_types = []
+exclude_door_events = false
+door_sub_event_types = []
+success_sub_event_types = []
+failure_sub_event_types = []
+
+[destinations.rancherito]
+url = "https://admin.rancherito.com.mx/api/integrations/hikvision/events"
+# Secreto dedicado. En Rancherito vive en settings.key = hikvision_integration_token.
+# No es el token de impresión.
+token_env = "RANCHERITO_EVENTS_TOKEN"
+# Si cambia la URL y quedan pendientes, elija una: hold, use_snapshot, use_current.
+pending_url_policy = ""

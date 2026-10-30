@@ -1,0 +1,12 @@
+{
+  "major": 5,
+  "minor": 75,
+  "time": "2026-10-29T09:00:00-06:00",
+  "serialNo": 12345,
+  "employeeNo": 2,
+  "employeeNoString": "0002",
+  "cardNo": "03322275427",
+  "attendanceStatus": "checkIn",
+  "label": "Entrada",
+  "currentVerifyMode": "face"
+}

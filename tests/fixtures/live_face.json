@@ -1,0 +1,22 @@
+{
+  "EventNotificationAlert": {
+    "dateTime": "2026-10-29T09:00:00-06:00",
+    "eventType": "AccessControllerEvent",
+    "eventState": "active",
+    "eventDescription": "Access Controller Event",
+    "devIndex": "9CE552AA-7ACD-7145-B340-A8618DA1B946",
+    "AccessControllerEvent": {
+      "majorEventType": 5,
+      "subEventType": 75,
+      "serialNo": 12345,
+      "employeeNo": 2,
+      "employeeNoString": "0002",
+      "cardNo": "03322275427",
+      "attendanceStatus": "checkIn",
+      "label": "Entrada",
+      "currentVerifyMode": "face",
+      "name": "Ana",
+      "pictureURL": "http://192.0.2.10/picture.jpg"
+    }
+  }
+}

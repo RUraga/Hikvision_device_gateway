@@ -1,0 +1,37 @@
+[Unit]
+Description=Puente de eventos Hikvision hacia aplicaciones HTTP
+After=network-online.target
+Wants=network-online.target
+# El nombre de la unidad del Device Gateway todavía no está confirmado.
+# Cuando exista, agregue por ejemplo:
+# After=hikvision-device-gateway.service
+# Wants=hikvision-device-gateway.service
+
+[Service]
+Type=simple
+User=hikvision-bridge
+Group=hikvision-bridge
+WorkingDirectory=/opt/hikvision-event-bridge
+EnvironmentFile=/etc/hikvision-event-bridge/hikvision-event-bridge.env
+ExecStart=/opt/hikvision-event-bridge/.venv/bin/hikvision-event-bridge run --config /etc/hikvision-event-bridge/config.toml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+StateDirectory=hikvision-event-bridge
+StateDirectoryMode=0750
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

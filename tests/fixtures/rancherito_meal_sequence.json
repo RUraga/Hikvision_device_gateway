@@ -1,0 +1,195 @@
+{
+  "meal": [
+    {
+      "schema_version": 1,
+      "event_id": "a0ab344d8d1fadb70021cfeb32736cf2cdc374d588316b40662471368dd5583a",
+      "device_index": "9CE552AA-7ACD-7145-B340-A8618DA1B946",
+      "serial_no": 2001,
+      "occurred_at": "2026-10-29T09:00:00-06:00",
+      "employee_no": "0002",
+      "card_no": "03322275427",
+      "attendance_status": "fixture-work-start",
+      "label": "fixture-entrada",
+      "major_event_type": 5,
+      "sub_event_type": 75,
+      "result": "unknown",
+      "verify_mode": "face",
+      "name": "Ana",
+      "source": "live",
+      "raw": {
+        "fixture": "live",
+        "serial_no": 2001
+      }
+    },
+    {
+      "schema_version": 1,
+      "event_id": "9e3e8cf8df694ebc77c82adc416202565f8e42ef28087c1294806b7c251cebf1",
+      "device_index": "9CE552AA-7ACD-7145-B340-A8618DA1B946",
+      "serial_no": 2002,
+      "occurred_at": "2026-10-29T14:00:00-06:00",
+      "employee_no": "0002",
+      "card_no": "03322275427",
+      "attendance_status": "fixture-meal-out",
+      "label": "fixture-comida",
+      "major_event_type": 5,
+      "sub_event_type": 75,
+      "result": "unknown",
+      "verify_mode": "face",
+      "name": "Ana",
+      "source": "live",
+      "raw": {
+        "fixture": "live",
+        "serial_no": 2002
+      }
+    },
+    {
+      "schema_version": 1,
+      "event_id": "b972ea5ebba8952f1e9131a094db3d11d06bd340dc95cbea3ef07c23acf240b3",
+      "device_index": "9CE552AA-7ACD-7145-B340-A8618DA1B946",
+      "serial_no": 2003,
+      "occurred_at": "2026-10-29T14:10:00-06:00",
+      "employee_no": "0002",
+      "card_no": "03322275427",
+      "attendance_status": "fixture-work-end",
+      "label": "fixture-salida",
+      "major_event_type": 5,
+      "sub_event_type": 75,
+      "result": "failure",
+      "verify_mode": "face",
+      "name": "Ana",
+      "source": "live",
+      "raw": {
+        "fixture": "live",
+        "serial_no": 2003
+      }
+    },
+    {
+      "schema_version": 1,
+      "event_id": "21b56cb0ce651b5222084419e798c0701c1ecc92f0cf998f160b54c91ea98158",
+      "device_index": "9CE552AA-7ACD-7145-B340-A8618DA1B946",
+      "serial_no": 2004,
+      "occurred_at": "2026-10-29T14:40:00-06:00",
+      "employee_no": "0002",
+      "card_no": "03322275427",
+      "attendance_status": "fixture-meal-in",
+      "label": "fixture-regreso",
+      "major_event_type": 5,
+      "sub_event_type": 75,
+      "result": "success",
+      "verify_mode": "face",
+      "name": "Ana",
+      "source": "live",
+      "raw": {
+        "fixture": "live",
+        "serial_no": 2004
+      }
+    },
+    {
+      "schema_version": 1,
+      "event_id": "99c2acf57f7274f24669d2bb618e04eebc5b088ce64bb3e51164881870247f2c",
+      "device_index": "9CE552AA-7ACD-7145-B340-A8618DA1B946",
+      "serial_no": 2005,
+      "occurred_at": "2026-10-29T15:00:00-06:00",
+      "employee_no": "0002",
+      "card_no": "03322275427",
+      "attendance_status": "codigo-sin-muestra",
+      "label": "texto-sin-muestra",
+      "major_event_type": 5,
+      "sub_event_type": 75,
+      "result": "unknown",
+      "verify_mode": "face",
+      "name": "Ana",
+      "source": "live",
+      "raw": {
+        "fixture": "live",
+        "serial_no": 2005
+      }
+    },
+    {
+      "schema_version": 1,
+      "event_id": "8c58f5c7ed1bf9e776af60756e88edc5080f55a076e10e176e73779466a46f6d",
+      "device_index": "9CE552AA-7ACD-7145-B340-A8618DA1B946",
+      "serial_no": 2006,
+      "occurred_at": "2026-10-29T18:00:00-06:00",
+      "employee_no": "0002",
+      "card_no": "03322275427",
+      "attendance_status": "fixture-work-end",
+      "label": "fixture-salida",
+      "major_event_type": 5,
+      "sub_event_type": 75,
+      "result": "unknown",
+      "verify_mode": "face",
+      "name": "Ana",
+      "source": "live",
+      "raw": {
+        "fixture": "live",
+        "serial_no": 2006
+      }
+    }
+  ],
+  "missing_punch": [
+    {
+      "schema_version": 1,
+      "event_id": "7a554216c8f9816242cab8f873bb4a4430fc42fad5a8b47cb24ffd2cdd13ae53",
+      "device_index": "9CE552AA-7ACD-7145-B340-A8618DA1B946",
+      "serial_no": 2101,
+      "occurred_at": "2026-10-30T09:00:00-06:00",
+      "employee_no": "0002",
+      "card_no": "03322275427",
+      "attendance_status": "fixture-work-start",
+      "label": "fixture-entrada",
+      "major_event_type": 5,
+      "sub_event_type": 75,
+      "result": "unknown",
+      "verify_mode": "face",
+      "name": "Ana",
+      "source": "live",
+      "raw": {
+        "fixture": "live",
+        "serial_no": 2101
+      }
+    },
+    {
+      "schema_version": 1,
+      "event_id": "05d91e607e25e5d2afd4aecaac48f963456b14876f27de078a5c7bfa24106782",
+      "device_index": "9CE552AA-7ACD-7145-B340-A8618DA1B946",
+      "serial_no": 2102,
+      "occurred_at": "2026-10-30T14:40:00-06:00",
+      "employee_no": "0002",
+      "card_no": "03322275427",
+      "attendance_status": "fixture-meal-in",
+      "label": "fixture-regreso",
+      "major_event_type": 5,
+      "sub_event_type": 75,
+      "result": "unknown",
+      "verify_mode": "face",
+      "name": "Ana",
+      "source": "live",
+      "raw": {
+        "fixture": "live",
+        "serial_no": 2102
+      }
+    },
+    {
+      "schema_version": 1,
+      "event_id": "a3be80642b802c34110a982383325e3d0da3759c7682037fe7ce5f574de189f0",
+      "device_index": "9CE552AA-7ACD-7145-B340-A8618DA1B946",
+      "serial_no": 2103,
+      "occurred_at": "2026-10-30T18:00:00-06:00",
+      "employee_no": "0002",
+      "card_no": "03322275427",
+      "attendance_status": "fixture-work-end",
+      "label": "fixture-salida",
+      "major_event_type": 5,
+      "sub_event_type": 75,
+      "result": "unknown",
+      "verify_mode": "face",
+      "name": "Ana",
+      "source": "live",
+      "raw": {
+        "fixture": "live",
+        "serial_no": 2103
+      }
+    }
+  ]
+}
